@@ -1,17 +1,8 @@
-# HUD API (required: go to huduser.gov, generate token)
-HUD_TOKEN=eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiI2IiwianRpIjoiYTFkNDliNGI4NmEyYzAzMzdhNmNiODJkMDNjM2E2NGZlMzMwNTFkNzIxM2I3YzdlOWJjMmYwZmI1MTRlNDVmMDZiNmE2NmY1YjZkOGYwM2IiLCJpYXQiOjE3NTg1ODg3NTEuNzgxODgsIm5iZiI6MTc1ODU4ODc1MS43ODE4ODIsImV4cCI6MjA3NDEyMTU1MS43NzcxNjQsInN1YiI6IjgyODc4Iiwic2NvcGVzIjpbXX0.a9nSwrf5EEFnQ0n6zDsRVZaZPeajc1Hmas9BHPPNSBbRs4BpPlwVlQt_j0JGtkGdxVdBoQpMoDoUjcqwHfqxoA
-
-# FRED API (required: register at St. Louis Fed, generate API key)
-FRED_API_KEY=2a25163d379da4c873d1598a47c9f622 
-
-# Census ACS doesn’t require a key, so nothing needed here
-# (the ACS API is open access)
-CENSUS_API_KEY=e6bfe7614aa1f06ef880707c1a9502283a6cce38
-# Optional: add other APIs if you use them later
-# e.g., Walk Score, AirNow, etc.
-# WALK_SCORE_KEY=your_walkscore_key_here
-# AIRNOW_KEY=your_airnow_key_here
-
-# Default config values (for your jobs)
-DEFAULT_GEO=county:49-035     # Salt Lake County (state 49, county 035)
-DEFAULT_YEAR=2025
+.venv/
+__pycache__/
+*.pyc
+.env
+data/
+web/.next/
+node_modules/
+.DS_Store
