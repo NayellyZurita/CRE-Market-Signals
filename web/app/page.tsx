@@ -1,103 +1,159 @@
-import Image from "next/image";
+import Link from "next/link";
 
-export default function Home() {
+import { SignalsChart } from "./components/SignalsChart";
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const DEFAULT_MARKET = process.env.NEXT_PUBLIC_DEFAULT_MARKET ?? "salt_lake_county";
+const DEFAULT_LIMIT = 200;
+
+type MarketSignal = {
+  source: string;
+  geo_level: string;
+  geo_id: string;
+  geo_name: string;
+  observed_at: string;
+  metric: string;
+  value: number;
+  unit: string;
+};
+
+type ApiResponse = {
+  count: number;
+  items: MarketSignal[];
+  error?: string;
+};
+
+async function fetchSignals(marketKey: string): Promise<ApiResponse> {
+  const url = `${API_BASE_URL}/signals?market=${marketKey}&limit=${DEFAULT_LIMIT}`;
+  try {
+    const res = await fetch(url, {
+      cache: "no-store",
+      next: { revalidate: 0 },
+    });
+
+    if (!res.ok) {
+      throw new Error(`Failed to load signals from API (${res.status})`);
+    }
+
+    return res.json();
+  } catch (error) {
+    console.error("Failed to fetch signals", error);
+    const message =
+      error instanceof Error ? error.message : "Unable to reach the API endpoint.";
+    return { count: 0, items: [], error: message };
+  }
+}
+
+function buildChartSeries(signals: MarketSignal[]) {
+  if (signals.length === 0) {
+    return { metric: "", unit: "", data: [] as { observed_at: string; value: number }[] };
+  }
+
+  const preferredMetric =
+    signals.find((signal) => signal.metric === "fmr_2br")?.metric ?? signals[0]!.metric;
+
+  const metricSignals = signals
+    .filter((signal) => signal.metric === preferredMetric)
+    .map((signal) => ({
+      observed_at: signal.observed_at,
+      value: signal.value,
+    }))
+    .sort((a, b) => new Date(a.observed_at).getTime() - new Date(b.observed_at).getTime());
+
+  const unit = signals.find((signal) => signal.metric === preferredMetric)?.unit ?? "";
+
+  return {
+    metric: preferredMetric,
+    unit,
+    data: metricSignals,
+  };
+}
+
+export default async function Home() {
+  const response = await fetchSignals(DEFAULT_MARKET);
+  const chartSeries = buildChartSeries(response.items);
+  const downloadBase = `${API_BASE_URL}/signals?market=${DEFAULT_MARKET}&limit=${DEFAULT_LIMIT}`;
+  const errorMessage = response.error;
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <main className="mx-auto flex max-w-5xl flex-col gap-10 px-6 py-10">
+        <header className="flex flex-col gap-2">
+          <h1 className="text-3xl font-semibold">CRE Market Signals</h1>
+          <p className="text-slate-600">
+            Unified metrics sourced from HUD, ACS, and FRED for {response.items[0]?.geo_name ?? "your market"}.
+            Export the latest dataset in your preferred format or explore the quick chart below.
+          </p>
+        </header>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
+        <section className="flex flex-wrap gap-4">
           <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+            className="rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700"
+            href={`${downloadBase}&format=json`}
             target="_blank"
             rel="noopener noreferrer"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
+            Download JSON
           </a>
           <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+            className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-emerald-700"
+            href={`${downloadBase}&format=csv`}
             target="_blank"
             rel="noopener noreferrer"
           >
-            Read our docs
+            Download CSV
           </a>
-        </div>
+          <a
+            className="rounded-full bg-fuchsia-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-fuchsia-700"
+            href={`${downloadBase}&format=parquet`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Download Parquet
+          </a>
+          <Link
+            className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-white"
+            href="/"
+          >
+            Refresh Dashboard
+          </Link>
+        </section>
+
+        <section className="rounded-lg bg-white p-6 shadow">
+          <div className="mb-4 flex items-baseline justify-between">
+            <div>
+              <h2 className="text-xl font-semibold">{chartSeries.metric || "No data"}</h2>
+              <p className="text-sm text-slate-500">Unit: {chartSeries.unit || "n/a"}</p>
+            </div>
+            <p className="text-sm text-slate-500">Total records fetched: {response.count}</p>
+          </div>
+          {errorMessage ? (
+            <p className="text-sm text-red-500">
+              {errorMessage}. Ensure the API is running at {API_BASE_URL}.
+            </p>
+          ) : chartSeries.data.length > 0 ? (
+            <SignalsChart data={chartSeries.data} metric={chartSeries.metric} unit={chartSeries.unit} />
+          ) : (
+            <p className="text-sm text-slate-500">No chartable data available for the selected market.</p>
+          )}
+        </section>
+
+        <section className="rounded-lg bg-white p-6 shadow">
+          <h2 className="mb-3 text-lg font-semibold">Recent observations</h2>
+          <ul className="grid gap-3 sm:grid-cols-2">
+            {response.items.slice(0, 6).map((signal) => (
+              <li key={`${signal.metric}-${signal.observed_at}-${signal.geo_id}`} className="rounded border border-slate-200 p-3">
+                <p className="text-sm font-medium text-slate-700">{signal.metric}</p>
+                <p className="text-2xl font-semibold text-slate-900">
+                  {signal.value.toLocaleString(undefined, { maximumFractionDigits: 2 })} {signal.unit}
+                </p>
+                <p className="text-xs text-slate-500">Observed {new Date(signal.observed_at).toLocaleDateString()}</p>
+                <p className="text-xs text-slate-400">Source: {signal.source}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
     </div>
   );
 }
