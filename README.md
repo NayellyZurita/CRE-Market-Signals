@@ -21,10 +21,16 @@ Copy environment templates:
 
 ```bash
 cp .env.example .env
-cp web/.env.local web/.env.local.example  # adjust as needed
 ```
 
-Populate `.env` with API keys (HUD, FRED, optional Census) and configure defaults such as `DEFAULT_GEO`.
+Create `web/.env.local` (or wire your own config) with at least:
+
+```
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_DEFAULT_MARKET=salt_lake_county
+```
+
+Populate `.env` with API keys (HUD, FRED, optional Census) and configure defaults such as `DEFAULT_GEO`, `DEFAULT_START_YEAR`, and `DEFAULT_END_YEAR`. `jobs/` and the API load this file automatically via `python-dotenv`.
 
 ## Running the Pipeline
 
@@ -33,7 +39,8 @@ Populate `.env` with API keys (HUD, FRED, optional Census) and configure default
    python -m jobs load-all
    ```
    - `python -m jobs list-markets` enumerates seeded markets.
-   - Use `--markets key1,key2` to scope a run or set env vars (`DEFAULT_GEO`, `FRED_SERIES_ID`).
+   - Use `--markets key1,key2` to scope a run or set env vars (`DEFAULT_GEO`, `DEFAULT_START_YEAR`, `DEFAULT_END_YEAR`, `FRED_SERIES_ID`).
+   - HUD/ACS ingestion loops through every year in `[DEFAULT_START_YEAR, DEFAULT_END_YEAR]`; ACS currently publishes through 2023, so later years log warnings and are skipped until available. FRED honours `FRED_OBSERVATION_START` / `FRED_OBSERVATION_END` when provided.
 
 2. **Serve the API** for normalized access:
    ```bash
@@ -57,6 +64,17 @@ npm --prefix web run lint
 ```
 
 Tests cover Pydantic schema validation and API format exports (JSON/CSV/Parquet). A `tests/conftest.py` fixture ensures the project root is importable.
+
+## Inspecting Data
+
+Use DuckDB to review what was ingested:
+
+```bash
+duckdb data/market_signals.duckdb
+SELECT source, metric, COUNT(*) FROM market_signals GROUP BY 1,2 ORDER BY 1,2;
+```
+
+Expect five HUD rent metrics (`fmr_0br`…`fmr_4br`) per year, four ACS metrics for available years, and a monthly FRED unemployment series across the configured observation window.
 
 ## Docker
 

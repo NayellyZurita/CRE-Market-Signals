@@ -6,35 +6,81 @@ pipelines can persist or serve.
 
 from __future__ import annotations
 
+import logging
 import os
-from datetime import datetime
+import re
+from datetime import datetime, UTC
 from typing import Any, Iterable, Mapping
+
+from httpx import HTTPStatusError
 
 from pipelines.common import fetch_json
 from pipelines.model import MarketSignal
 
 HUD_FMR_BASE_URL = "https://www.huduser.gov/hudapi/public/fmr/data"
 
-# Mapping of HUD field names to canonical metric identifiers and units.
+# Canonical metric -> (HUD field name in flat shape, unit)
 HUD_FMR_FIELDS: Mapping[str, tuple[str, str]] = {
-    "fmr_0br": ("FMR_0", "USD"),
-    "fmr_1br": ("FMR_1", "USD"),
-    "fmr_2br": ("FMR_2", "USD"),
-    "fmr_3br": ("FMR_3", "USD"),
-    "fmr_4br": ("FMR_4", "USD"),
+    "fmr_0br": ("fmr_0br", "USD"),
+    "fmr_1br": ("fmr_1br", "USD"),
+    "fmr_2br": ("fmr_2br", "USD"),
+    "fmr_3br": ("fmr_3br", "USD"),
+    "fmr_4br": ("fmr_4br", "USD"),
 }
 
+# Mapping of nested HUD basicdata labels to canonical metrics
+HUD_BASICDATA_FIELDS: Mapping[str, tuple[str, str]] = {
+    "Efficiency": ("fmr_0br", "USD"),
+    "One-Bedroom": ("fmr_1br", "USD"),
+    "Two-Bedroom": ("fmr_2br", "USD"),
+    "Three-Bedroom": ("fmr_3br", "USD"),
+    "Four-Bedroom": ("fmr_4br", "USD"),
+}
 
-def _resolve_token(token: str | None) -> str:
+logger = logging.getLogger(__name__)
+
+
+def _resolve_token(token: str | None) -> str | None:
     resolved = token or os.getenv("HUD_TOKEN")
     if not resolved:
-        raise RuntimeError(
-            "HUD API token missing. Provide it explicitly or set HUD_TOKEN environment variable."
+        logger.warning(
+            "HUD API token missing. Skipping HUD FMR fetch. Set HUD_TOKEN or pass token explicitly."
         )
     return resolved
 
 
+def _to_hud_entityid(geo: str) -> str:
+    """
+    Accepts '49-035', '49035', 'county:4903599999', or '4903599999'
+    and returns the 10-digit HUD entity id (county FIPS padded with 9s).
+    """
+    s = re.sub(r"\D", "", geo or "")
+    if len(s) == 5:
+        return (s + "9999").ljust(10, "9")
+    if len(s) == 10 and s.endswith("9999"):
+        return s
+    raise ValueError(f"Unrecognized HUD geo format: {geo!r}")
+
+
 def _iter_fmr_values(record: Mapping[str, Any]) -> Iterable[tuple[str, str, float]]:
+    """
+    Yields (metric, unit, value) triples from either the nested 'basicdata' shape
+    or the older flat 'fmr_*' shape.
+    """
+    # 1) Nested basicdata (current API)
+    basic = record.get("basicdata")
+    if isinstance(basic, Mapping):
+        for hud_key, (metric, unit) in HUD_BASICDATA_FIELDS.items():
+            raw_value = basic.get(hud_key)
+            if raw_value in (None, "", "NA", "N/A"):
+                continue
+            try:
+                yield metric, unit, float(raw_value)
+            except (TypeError, ValueError):
+                continue
+        return
+
+    # 2) Flat shape fallback: keys like 'fmr_2br' at top level
     for metric, (field_name, unit) in HUD_FMR_FIELDS.items():
         raw_value = record.get(field_name)
         if raw_value in (None, "", "NA", "N/A"):
@@ -46,16 +92,18 @@ def _iter_fmr_values(record: Mapping[str, Any]) -> Iterable[tuple[str, str, floa
 
 
 def _extract_geo_name(record: Mapping[str, Any]) -> str | None:
-    parts: list[str] = []
-    for key in ("county", "cbsa_name", "county_name", "name"):
-        value = record.get(key)
-        if isinstance(value, str) and value.strip():
-            parts.append(value.strip())
+    # Prefer the richer labels HUD returns
+    candidates = []
+    for key in ("area_name", "metro_name", "county_name", "cbsa_name", "county", "name"):
+        val = record.get(key)
+        if isinstance(val, str) and val.strip():
+            candidates.append(val.strip())
     state = record.get("state")
     if isinstance(state, str) and state.strip():
-        parts.append(state.strip())
-    if parts:
-        return ", ".join(dict.fromkeys(parts))  # maintain order, remove duplicates
+        candidates.append(state.strip())
+    if candidates:
+        # maintain order, remove duplicates
+        return ", ".join(dict.fromkeys(candidates))
     return None
 
 
@@ -67,34 +115,41 @@ async def fetch_hud_fmr(
     token: str | None = None,
     params: Mapping[str, Any] | None = None,
 ) -> list[MarketSignal]:
-    """Fetch HUD Fair Market Rent data for a geography and normalize it.
-
-    Parameters
-    ----------
-    entity_id:
-        Identifier HUD expects in the URL (county FIPS, CBSA code, etc.). This becomes
-        the canonical ``geo_id`` in the resulting signals.
-    geo_level:
-        The geography granularity, such as ``"county"`` or ``"cbsa"``.
-    year:
-        Fiscal year to request from HUD.
-    token:
-        Optional HUD API bearer token. Falls back to ``HUD_TOKEN`` environment variable.
-    params:
-        Additional query parameters forwarded to the API.
-    """
-
+    """Fetch HUD Fair Market Rent data for a geography and normalize it."""
     resolved_token = _resolve_token(token)
+    if not resolved_token:
+        return []
+
+    # Normalize whatever was passed (e.g., '49-035' -> '4903599999')
+    try:
+        hud_entity = _to_hud_entityid(entity_id)
+    except ValueError as e:
+        logger.warning("HUD FMR: %s. Skipping.", e)
+        return []
+
     request_params = {"year": year}
     if params:
         request_params.update(params)
 
-    payload = await fetch_json(
-        f"{HUD_FMR_BASE_URL}/{entity_id}",
-        headers={"Authorization": f"Bearer {resolved_token}"},
-        params=request_params,
-    )
+    try:
+        payload = await fetch_json(
+            f"{HUD_FMR_BASE_URL}/{hud_entity}",
+            headers={"Authorization": f"Bearer {resolved_token}", "Accept": "application/json"},
+            params=request_params,
+        )
+    except HTTPStatusError as exc:
+        status = exc.response.status_code if exc.response is not None else "?"
+        logger.warning(
+            "HUD FMR request failed for %s (normalized from %s, %s) year=%s status=%s. Skipping.",
+            hud_entity,
+            entity_id,
+            geo_level,
+            year,
+            status,
+        )
+        return []
 
+    # Normalize payload into a list of mapping records
     records: list[Mapping[str, Any]]
     if isinstance(payload, Mapping):
         candidate = payload.get("data", payload)
@@ -109,10 +164,21 @@ async def fetch_hud_fmr(
     else:
         records = []
 
-    observed_at = datetime(year, 1, 1)
+    # Observed timestamp: prefer response year if present in basicdata, else parameter year
+    resp_year = None
+    if records and isinstance(records[0].get("basicdata"), Mapping):
+        try:
+            resp_year = int(records[0]["basicdata"].get("year") or year)
+        except (TypeError, ValueError):
+            resp_year = year
+    else:
+        resp_year = year
+
+    observed_at = datetime(resp_year, 1, 1, tzinfo=UTC)
+
     signals: list[MarketSignal] = []
     for record in records:
-        geo_name = _extract_geo_name(record) or entity_id
+        geo_name = _extract_geo_name(record) or hud_entity
         for metric, unit, value in _iter_fmr_values(record):
             signals.append(
                 MarketSignal(

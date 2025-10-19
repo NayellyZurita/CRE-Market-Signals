@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
 
 class MarketSignal(BaseModel):
@@ -41,7 +41,11 @@ class MarketSignal(BaseModel):
         description="Raw upstream payload segment retained for traceability and debugging.",
     )
 
-    class Config:
-        anystr_strip_whitespace = True
-        allow_mutation = False
-        json_encoders = {datetime: lambda dt: dt.isoformat()}
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        frozen=True,
+    )
+
+    @field_serializer("observed_at", when_used="json")
+    def _serialize_observed_at(self, value: datetime) -> str:
+        return value.isoformat()

@@ -83,7 +83,7 @@ def ensure_market_signals_table(conn: duckdb.DuckDBPyConnection) -> None:
 
 
 def _serialize_signal(signal: MarketSignal) -> tuple:
-    data = signal.dict()
+    data = signal.model_dump()
     raw_payload = data.get("raw_payload")
     return (
         data["source"],

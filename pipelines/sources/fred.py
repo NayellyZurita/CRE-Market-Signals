@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 from dataclasses import dataclass
@@ -28,12 +29,14 @@ class FredSeriesConfig:
 
 _SENTINEL_VALUES = {".", "NA", "N/A", ""}
 
+logger = logging.getLogger(__name__)
 
-def _resolve_api_key(api_key: str | None) -> str:
+
+def _resolve_api_key(api_key: str | None) -> str | None:
     resolved = api_key or os.getenv("FRED_API_KEY")
     if not resolved:
-        raise RuntimeError(
-            "FRED API key missing. Provide it explicitly or set FRED_API_KEY environment variable."
+        logger.warning(
+            "FRED API key missing. Skipping FRED fetch. Set FRED_API_KEY or pass api_key explicitly."
         )
     return resolved
 
@@ -80,6 +83,8 @@ async def fetch_fred_series(
     """Fetch observations for a configured FRED series and normalize them."""
 
     resolved_key = _resolve_api_key(api_key)
+    if not resolved_key:
+        return []
     request_params: dict[str, Any] = {
         "series_id": config.series_id,
         "api_key": resolved_key,

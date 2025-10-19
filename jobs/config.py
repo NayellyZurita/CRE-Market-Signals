@@ -14,10 +14,17 @@ class MarketConfig:
     geo_level: str
     geo_id: str
     geo_name: str
-    year: int
+    start_year: int
+    end_year: int
     fred_series_id: str | None = None
     fred_metric: str = "unemp_rate"
     fred_unit: str = "%"
+    fred_observation_start: str | None = None
+    fred_observation_end: str | None = None
+
+    @property
+    def years(self) -> range:
+        return range(self.start_year, self.end_year + 1)
 
 
 TARGET_MARKETS: tuple[MarketConfig, ...] = (
@@ -26,32 +33,44 @@ TARGET_MARKETS: tuple[MarketConfig, ...] = (
         geo_level="county",
         geo_id="49-035",
         geo_name="Salt Lake County, UT",
-        year=2025,
+        start_year=2023,
+        end_year=2025,
         fred_series_id="LAUCN490350000000003A",
+        fred_observation_start="2023-01-01",
+        fred_observation_end="2025-03-31",
     ),
     MarketConfig(
         key="maricopa_county",
         geo_level="county",
         geo_id="04-013",
         geo_name="Maricopa County, AZ",
-        year=2025,
+        start_year=2023,
+        end_year=2025,
         fred_series_id="LAUCN040130000000003A",
+        fred_observation_start="2023-01-01",
+        fred_observation_end="2025-03-31",
     ),
     MarketConfig(
         key="travis_county",
         geo_level="county",
         geo_id="48-453",
         geo_name="Travis County, TX",
-        year=2025,
+        start_year=2023,
+        end_year=2025,
         fred_series_id="LAUCN484530000000003A",
+        fred_observation_start="2023-01-01",
+        fred_observation_end="2025-03-31",
     ),
     MarketConfig(
         key="king_county",
         geo_level="county",
         geo_id="53-033",
         geo_name="King County, WA",
-        year=2025,
+        start_year=2023,
+        end_year=2025,
         fred_series_id="LAUCN530330000000003A",
+        fred_observation_start="2023-01-01",
+        fred_observation_end="2025-03-31",
     ),
 )
 

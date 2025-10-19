@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from datetime import datetime
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -12,6 +12,7 @@ import duckdb
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from dotenv import load_dotenv
 
 from jobs.config import MarketConfig, get_market_by_key
 from pipelines.model import MarketSignal
@@ -21,8 +22,17 @@ from storage.exports import export_to_csv, export_to_parquet
 DEFAULT_LIMIT = 200
 MAX_LIMIT = 2000
 ALLOWED_FORMATS = {"json", "csv", "parquet"}
+load_dotenv()
 
-app = FastAPI(title="CRE Market Signals API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    conn = connect()
+    conn.close()
+    yield
+
+
+app = FastAPI(title="CRE Market Signals API", version="0.1.0", lifespan=lifespan)
 
 
 def _configure_cors() -> None:
@@ -43,20 +53,6 @@ _configure_cors()
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
-
-
-@app.on_event("startup")
-def ensure_database_ready() -> None:
-    """Ensure the DuckDB file and schema exist before handling requests."""
-
-    conn = connect()
-    try:
-        # ``connect`` with defaults will create the database file and table if needed.
-        pass
-    finally:
-        conn.close()
-
-
 def _build_filters(
     *,
     market: str | None,
@@ -101,17 +97,7 @@ def _build_query(where: str | None, limit: int) -> str:
 
 
 def _serialize_signals(signals: Sequence[MarketSignal]) -> list[dict[str, Any]]:
-    serialized: list[dict[str, Any]] = []
-    for signal in signals:
-        record = signal.dict()
-        value = record.get("value")
-        if isinstance(value, float):
-            record["value"] = float(value)
-        observed_at = record.get("observed_at")
-        if isinstance(observed_at, datetime):
-            record["observed_at"] = observed_at.isoformat()
-        serialized.append(record)
-    return serialized
+    return [signal.model_dump(mode="json") for signal in signals]
 
 
 @app.get("/signals")

@@ -6,15 +6,21 @@ Retrieves ACS statistics for configured variables and converts them into
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 from typing import Any, Mapping
+
+from httpx import HTTPStatusError
 
 from pipelines.common import fetch_json
 from pipelines.model import MarketSignal
 
 ACS_BASE_URL = "https://api.census.gov/data"
 ACS_DEFAULT_DATASET = "acs/acs5"
+ACS_LATEST_AVAILABLE_YEAR = 2023
+
+logger = logging.getLogger(__name__)
 
 # Default set of ACS variables commonly used for market analysis.
 ACS_DEFAULT_VARIABLES: Mapping[str, tuple[str, str]] = {
@@ -83,6 +89,17 @@ async def fetch_acs(
 ) -> list[MarketSignal]:
     """Fetch ACS data and normalize it into ``MarketSignal`` objects."""
 
+    if year > ACS_LATEST_AVAILABLE_YEAR:
+        logger.warning(
+            "ACS dataset unavailable for %s (state=%s county=%s year=%s). Latest year is %s.",
+            geo_level,
+            state_fips,
+            county_fips,
+            year,
+            ACS_LATEST_AVAILABLE_YEAR,
+        )
+        return []
+
     if not variables:
         return []
 
@@ -99,7 +116,19 @@ async def fetch_acs(
         params.update(extra_params)
 
     url = f"{ACS_BASE_URL}/{year}/{dataset}"
-    payload = await fetch_json(url, params=params)
+    try:
+        payload = await fetch_json(url, params=params)
+    except HTTPStatusError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            logger.warning(
+                "ACS dataset unavailable for %s (state=%s county=%s year=%s).",
+                geo_level,
+                state_fips,
+                county_fips,
+                year,
+            )
+            return []
+        raise
 
     if not isinstance(payload, list) or not payload:
         return []

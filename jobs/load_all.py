@@ -7,12 +7,16 @@ import logging
 import os
 from typing import Iterable
 
+from dotenv import load_dotenv
+
 from pipelines.sources.acs import fetch_acs
 from pipelines.sources.fred import FredSeriesConfig, fetch_fred_series
 from pipelines.sources.hud_fmr import fetch_hud_fmr
 from pipelines.model import MarketSignal
 from storage.db import connect, upsert_market_signals
 from jobs.config import MarketConfig, TARGET_MARKETS, iter_markets
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +43,27 @@ def _split_fips(geo_id: str) -> tuple[str, str | None]:
 
 
 async def _gather_signals_for_market(market: MarketConfig) -> list[MarketSignal]:
-    hud_signals = await fetch_hud_fmr(
-        entity_id=market.geo_id,
-        geo_level=market.geo_level,
-        year=market.year,
-    )
-
     state_fips, county_fips = _split_fips(market.geo_id)
-    acs_signals = await fetch_acs(
-        year=market.year,
-        state_fips=state_fips,
-        county_fips=county_fips,
-        geo_level=market.geo_level,
-    )
+
+    collected: list[MarketSignal] = []
+
+    for year in market.years:
+        collected.extend(
+            await fetch_hud_fmr(
+                entity_id=market.geo_id,
+                geo_level=market.geo_level,
+                year=year,
+            )
+        )
+
+        collected.extend(
+            await fetch_acs(
+                year=year,
+                state_fips=state_fips,
+                county_fips=county_fips,
+                geo_level=market.geo_level,
+            )
+        )
 
     fred_signals: list[MarketSignal] = []
     if market.fred_series_id:
@@ -63,11 +75,17 @@ async def _gather_signals_for_market(market: MarketConfig) -> list[MarketSignal]
             geo_id=market.geo_id,
             geo_name=market.geo_name,
         )
-        fred_signals = await fetch_fred_series(fred_config)
+        fred_signals = await fetch_fred_series(
+            fred_config,
+            observation_start=market.fred_observation_start
+            or f"{market.start_year}-01-01",
+            observation_end=market.fred_observation_end
+            or f"{market.end_year}-12-31",
+        )
     else:
         logger.info("Skipping FRED load for %s (no series configured).", market.key)
 
-    return [*hud_signals, *acs_signals, *fred_signals]
+    return [*collected, *fred_signals]
 
 
 def _markets_from_env() -> list[MarketConfig] | None:
@@ -76,11 +94,17 @@ def _markets_from_env() -> list[MarketConfig] | None:
         return None
 
     geo_level, geo_id = _parse_geo(default_geo)
-    year = int(os.getenv("DEFAULT_YEAR", "2025"))
+    start_year = int(
+        os.getenv("DEFAULT_START_YEAR")
+        or os.getenv("DEFAULT_YEAR", "2025")
+    )
+    end_year = int(os.getenv("DEFAULT_END_YEAR", str(start_year)))
     geo_name = os.getenv("DEFAULT_GEO_NAME", geo_id)
     fred_series_id = os.getenv(DEFAULT_FRED_SERIES_ID_ENV)
     fred_metric = os.getenv(DEFAULT_FRED_METRIC_ENV, "unemp_rate")
     fred_unit = os.getenv(DEFAULT_FRED_UNIT_ENV, "%")
+    fred_observation_start = os.getenv("FRED_OBSERVATION_START")
+    fred_observation_end = os.getenv("FRED_OBSERVATION_END")
 
     return [
         MarketConfig(
@@ -88,10 +112,13 @@ def _markets_from_env() -> list[MarketConfig] | None:
             geo_level=geo_level,
             geo_id=geo_id,
             geo_name=geo_name,
-            year=year,
+            start_year=start_year,
+            end_year=end_year,
             fred_series_id=fred_series_id,
             fred_metric=fred_metric,
             fred_unit=fred_unit,
+            fred_observation_start=fred_observation_start,
+            fred_observation_end=fred_observation_end,
         )
     ]
 

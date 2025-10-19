@@ -69,9 +69,23 @@ function buildChartSeries(signals: MarketSignal[]) {
   };
 }
 
+function buildLatestObservations(signals: MarketSignal[]) {
+  const sorted = [...signals].sort(
+    (a, b) => new Date(b.observed_at).getTime() - new Date(a.observed_at).getTime()
+  );
+  const byMetric = new Map<string, MarketSignal>();
+  for (const signal of sorted) {
+    if (!byMetric.has(signal.metric)) {
+      byMetric.set(signal.metric, signal);
+    }
+  }
+  return Array.from(byMetric.values()).sort((a, b) => a.metric.localeCompare(b.metric));
+}
+
 export default async function Home() {
   const response = await fetchSignals(DEFAULT_MARKET);
   const chartSeries = buildChartSeries(response.items);
+  const latestObservations = buildLatestObservations(response.items);
   const downloadBase = `${API_BASE_URL}/signals?market=${DEFAULT_MARKET}&limit=${DEFAULT_LIMIT}`;
   const errorMessage = response.error;
 
@@ -141,7 +155,7 @@ export default async function Home() {
         <section className="rounded-lg bg-white p-6 shadow">
           <h2 className="mb-3 text-lg font-semibold">Recent observations</h2>
           <ul className="grid gap-3 sm:grid-cols-2">
-            {response.items.slice(0, 6).map((signal) => (
+            {latestObservations.map((signal) => (
               <li key={`${signal.metric}-${signal.observed_at}-${signal.geo_id}`} className="rounded border border-slate-200 p-3">
                 <p className="text-sm font-medium text-slate-700">{signal.metric}</p>
                 <p className="text-2xl font-semibold text-slate-900">
