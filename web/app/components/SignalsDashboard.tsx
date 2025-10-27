@@ -56,12 +56,32 @@ function buildLatestObservations(signals: MarketSignal[]): MarketSignal[] {
   return Array.from(byMetric.values()).sort((a, b) => a.metric.localeCompare(b.metric));
 }
 
-function buildChartSeries(signals: MarketSignal[], metric: string) {
+function extractMetricYears(signals: MarketSignal[], metric: string): number[] {
+  const years = new Set<number>();
+  for (const signal of signals) {
+    if (signal.metric !== metric) continue;
+    years.add(new Date(signal.observed_at).getUTCFullYear());
+  }
+  return Array.from(years).sort((a, b) => a - b);
+}
+
+function buildChartSeries(
+  signals: MarketSignal[],
+  metric: string,
+  startYear?: number,
+  endYear?: number
+) {
   if (!metric) {
     return { metric: "", unit: "", data: [] as { observed_at: string; value: number }[] };
   }
   const metricSignals = signals
-    .filter((signal) => signal.metric === metric)
+    .filter((signal) => {
+      if (signal.metric !== metric) return false;
+      const year = new Date(signal.observed_at).getUTCFullYear();
+      if (startYear !== undefined && year < startYear) return false;
+      if (endYear !== undefined && year > endYear) return false;
+      return true;
+    })
     .map((signal) => ({ observed_at: signal.observed_at, value: signal.value }))
     .sort((a, b) => new Date(a.observed_at).getTime() - new Date(b.observed_at).getTime());
   const unit = signals.find((signal) => signal.metric === metric)?.unit ?? "";
@@ -81,15 +101,37 @@ export function SignalsDashboard({
     return preferred?.metric ?? metricOptions[0]?.metric ?? "";
   });
 
+  const [availableYears, setAvailableYears] = useState<number[]>([]);
+  const [startYear, setStartYear] = useState<number | undefined>(undefined);
+  const [endYear, setEndYear] = useState<number | undefined>(undefined);
+
   useEffect(() => {
     if (!metricOptions.some((option) => option.metric === selectedMetric)) {
       setSelectedMetric(metricOptions[0]?.metric ?? "");
     }
   }, [metricOptions, selectedMetric]);
 
+  useEffect(() => {
+    if (!selectedMetric) {
+      setAvailableYears([]);
+      setStartYear(undefined);
+      setEndYear(undefined);
+      return;
+    }
+    const years = extractMetricYears(signals, selectedMetric);
+    setAvailableYears(years);
+    if (years.length > 0) {
+      setStartYear(years[0]);
+      setEndYear(years[years.length - 1]);
+    } else {
+      setStartYear(undefined);
+      setEndYear(undefined);
+    }
+  }, [signals, selectedMetric]);
+
   const chartSeries = useMemo(
-    () => buildChartSeries(signals, selectedMetric),
-    [signals, selectedMetric]
+    () => buildChartSeries(signals, selectedMetric, startYear, endYear),
+    [signals, selectedMetric, startYear, endYear]
   );
 
   const latestObservations = useMemo(
@@ -154,6 +196,55 @@ export function SignalsDashboard({
               ))}
             </select>
           </div>
+          {availableYears.length > 0 ? (
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+              <label className="text-sm font-medium text-slate-700" htmlFor="start-year">
+                Years
+              </label>
+              <div className="flex items-center gap-2">
+                <select
+                  id="start-year"
+                  className="rounded border border-slate-300 px-3 py-1 text-sm"
+                  value={startYear ?? ""}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (Number.isNaN(value)) {
+                      setStartYear(undefined);
+                      return;
+                    }
+                    setStartYear(value);
+                    setEndYear((prev) => (prev !== undefined && prev < value ? value : prev));
+                  }}
+                >
+                  {availableYears.map((year) => (
+                    <option key={`start-${year}`} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-sm text-slate-500">to</span>
+                <select
+                  className="rounded border border-slate-300 px-3 py-1 text-sm"
+                  value={endYear ?? ""}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (Number.isNaN(value)) {
+                      setEndYear(undefined);
+                      return;
+                    }
+                    setEndYear(value);
+                    setStartYear((prev) => (prev !== undefined && prev > value ? value : prev));
+                  }}
+                >
+                  {availableYears.map((year) => (
+                    <option key={`end-${year}`} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          ) : null}
           <p className="text-sm text-slate-500">Total records fetched: {totalCount}</p>
         </div>
         {errorMessage ? (
