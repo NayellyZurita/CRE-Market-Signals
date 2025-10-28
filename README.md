@@ -7,6 +7,7 @@ Unified pipeline for ingesting HUD FMR, Census ACS, and FRED metrics; normalizin
 - Python 3.12+
 - Node.js 20+
 - DuckDB (installed automatically via Python package)
+- Docker & Docker Compose (for orchestrated stack / Airflow)
 
 ## Setup
 
@@ -31,6 +32,13 @@ NEXT_PUBLIC_DEFAULT_MARKET=salt_lake_county
 ```
 
 Populate `.env` with API keys (HUD, FRED, optional Census) and configure defaults such as `DEFAULT_GEO`, `DEFAULT_START_YEAR`, and `DEFAULT_END_YEAR`. `jobs/` and the API load this file automatically via `python-dotenv`.
+
+For Airflow you also need to set:
+
+- `COMPOSE_PROJECT_NAME` – used to derive the shared Docker network name.
+- `AIRFLOW_UID` – your host UID for file ownership (50000 works on macOS/Linux).
+- `AIRFLOW_ADMIN_USERNAME` / `AIRFLOW_ADMIN_PASSWORD` – web UI credentials.
+- `AIRFLOW_DB_PASSWORD` – Postgres password for the Airflow metadata database.
 
 ## Running the Pipeline
 
@@ -86,7 +94,25 @@ docker compose up --build
 
 - `Dockerfile.api` builds the FastAPI service and seeds dependencies from `requirements.txt`.
 - `Dockerfile.web` produces a static Next.js build served via `next start`.
-- `docker-compose.yml` wires both services; the API persists `market_signals.duckdb` in a volume.
+- `docker-compose.yml` wires the stack: API, web, Postgres, and Airflow services all share a named volume (`market_signals_data`) so the DuckDB file stays consistent.
+
+## Airflow Orchestration
+
+1. Ensure `.env` contains the Airflow variables mentioned above (admin credentials, UID, project name, API tokens).
+2. Bootstrap the Airflow metadata database:
+   ```bash
+   docker compose up airflow-init
+   ```
+3. Start the full stack (API, web, Postgres, Airflow webserver & scheduler):
+   ```bash
+   docker compose up --build
+   ```
+4. Open the Airflow UI at <http://localhost:8080> and log in with `AIRFLOW_ADMIN_USERNAME` / `AIRFLOW_ADMIN_PASSWORD`.
+5. Locate the `load_all_daily` DAG, unpause it, and trigger a manual run to confirm `jobs.load_all` executes successfully.
+6. The DAG performs basic data-quality checks (row counts per source) and records a `load_status` timestamp inside DuckDB. Inspect task logs in Airflow for run details.
+
+Tip: Airflow uses the DockerOperator to run the same API image that powers the CLI, so HUD/FRED tokens and the DuckDB volume are shared automatically. Leave new DAGs paused in development to avoid automatic runs, and adjust `DEFAULT_START_YEAR` / `DEFAULT_END_YEAR` in `.env` when you want to backfill additional years.
+Only the API service and DockerOperator task mount the named volume `market_signals_data` at `/app/data`; the Airflow webserver/scheduler do not need that volume.
 
 ## Project Structure
 
@@ -104,6 +130,7 @@ docker compose up --build
 - **API returning 500**: Ensure the DuckDB file contains data (`python -m jobs load-all`) and that `.env` points to correct DB path. Startup hook pre-creates the schema.
 - **Frontend “Failed to fetch”**: Confirm `uvicorn` is running on the host configured via `NEXT_PUBLIC_API_BASE_URL`.
 - **CORS issues**: Set `API_CORS_ORIGINS` (comma-separated) in `.env` before launching the API.
+- **Airflow warnings about missing tokens**: confirm the `.env` file mounted in Compose includes `HUD_TOKEN`, `FRED_API_KEY`, and `CENSUS_API_KEY` so the DockerOperator inherits them.
 
 ## Roadmap
 

@@ -6,3 +6,5 @@ data/
 web/.next/
 node_modules/
 .DS_Store
+airflow/logs/
+airflow/__pycache__/

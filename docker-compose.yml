@@ -1,14 +1,98 @@
+
 services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: cre-market-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD:-airflow}
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  airflow-init:
+    image: apache/airflow:2.9.2
+    container_name: cre-market-airflow-init
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_DEFAULT_CONNECTIONS: "False"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "True"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:-airflow}@postgres:5432/airflow
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./airflow/logs:/opt/airflow/logs
+    user: "${AIRFLOW_UID:-50000}:0"
+    entrypoint: >
+      bash -c "airflow db migrate && airflow users create --role Admin --username '$${AIRFLOW_ADMIN_USERNAME}' --password '$${AIRFLOW_ADMIN_PASSWORD}' --firstname Airflow --lastname Admin --email admin@example.com"
+
+  airflow-webserver:
+    image: apache/airflow:2.9.2
+    container_name: cre-market-airflow-webserver
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_DEFAULT_CONNECTIONS: "False"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "True"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:-airflow}@postgres:5432/airflow
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./airflow/logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+    user: "${AIRFLOW_UID:-50000}:0"
+    ports:
+      - "8080:8080"
+    command: webserver
+
+  airflow-scheduler:
+    image: apache/airflow:2.9.2
+    container_name: cre-market-airflow-scheduler
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_DEFAULT_CONNECTIONS: "False"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "True"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:-airflow}@postgres:5432/airflow
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./airflow/logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+    user: "${AIRFLOW_UID:-50000}:0"
+    command: scheduler
+
   api:
     build:
       context: .
       dockerfile: Dockerfile.api
+    image: cre-market-signals-api:latest
     container_name: cre-market-api
+    env_file:
+      - .env
     environment:
-      - PORT=8000
-      - API_CORS_ORIGINS=*
+      PORT: 8000
+      API_CORS_ORIGINS: "*"
     volumes:
-      - ./data:/app/data
+      - market_signals_data:/app/data
     ports:
       - "8000:8000"
 
@@ -17,9 +101,15 @@ services:
       context: .
       dockerfile: Dockerfile.web
     container_name: cre-market-web
+    env_file:
+      - .env
     environment:
-      - NEXT_PUBLIC_API_BASE_URL=http://api:8000
+      NEXT_PUBLIC_API_BASE_URL: http://api:8000
     depends_on:
       - api
     ports:
       - "3000:3000"
+
+volumes:
+  market_signals_data:
+  postgres_data:
