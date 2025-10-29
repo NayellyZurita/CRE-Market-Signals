@@ -1,5 +1,7 @@
 import { SignalsDashboard, type MarketSignal } from "./components/SignalsDashboard";
 
+export const dynamic = "force-dynamic";
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 const DEFAULT_MARKET = process.env.NEXT_PUBLIC_DEFAULT_MARKET ?? "salt_lake_county";
 const DEFAULT_LIMIT = 200;
