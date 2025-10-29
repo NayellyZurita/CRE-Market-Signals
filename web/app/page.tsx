@@ -43,8 +43,16 @@ export default async function Home() {
         <header className="flex flex-col gap-2">
           <h1 className="text-3xl font-semibold">CRE Market Signals</h1>
           <p className="text-slate-600">
-            Unified metrics sourced from HUD, ACS, and FRED for {response.items[0]?.geo_name ?? "your market"}.
-            Export the latest dataset in your preferred format or explore the quick chart below.
+            CRE Market Signals orchestrates a daily ETL pipeline that extracts raw HUD FMR, Census ACS, and
+            FRED datasets, normalizes them into a shared <code>MarketSignal</code> schema, and persists everything in
+            DuckDB for low-latency analytics. Airflow handles scheduling, quality checks, and a status log, while
+            the FastAPI layer exposes the data via a single `/signals` endpoint for both this dashboard and any
+            downstream integrations.
+          </p>
+          <p className="text-slate-600">
+            Choose a market to explore historical trends across rent, income, population, and labor metrics.
+            Every visualization is backed by the same curated DuckDB file, so exports, API responses, and charts
+            stay in sync with the Airflow-managed ingestion jobs.
           </p>
         </header>
 
