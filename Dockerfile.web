@@ -1,20 +1,30 @@
-FROM node:20-alpine AS deps
+# ---------- deps ----------
+FROM node:20-bullseye AS deps
 WORKDIR /app
+
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 
-FROM node:20-alpine AS builder
+# ---------- builder ----------
+FROM node:20-bullseye AS builder
 WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY web/. ./
 RUN npm run build
 
-FROM node:20-alpine AS runner
+# ---------- runner ----------
+FROM node:20-bullseye AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=builder /app/public ./public
+ENV NEXT_TELEMETRY_DISABLED=1
+
 COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
 COPY --from=deps /app/node_modules ./node_modules
+
 EXPOSE 3000
-CMD ["npm", "run", "start"]
+CMD ["npm", "start"]
