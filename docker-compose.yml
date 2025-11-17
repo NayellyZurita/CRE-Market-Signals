@@ -100,6 +100,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://api:8000
+        NEXT_PUBLIC_DEFAULT_MARKET: salt_lake_county
     container_name: cre-market-web
     env_file:
       - .env
