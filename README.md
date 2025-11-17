@@ -2,8 +2,6 @@
 
 Unified pipeline for ingesting HUD FMR, Census ACS, and FRED metrics; normalizing them into a single DuckDB store; and serving the results through a FastAPI backend and Next.js dashboard.
 
-![CRE architecture diagram](CRE-Arquitecture-Diagram.png)
-
 ## Prerequisites
 
 - Python 3.12+
